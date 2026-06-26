@@ -20,12 +20,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           lfs: true
 
       - name: Cache Library
-        uses: actions/cache@v6
+        uses: actions/cache@v4
         with:
           path: Library
           key: Library-WebGL-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
@@ -51,37 +51,62 @@ jobs:
         with:
           targetPlatform: WebGL
           unityVersion: auto
+          buildsPath: build
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
 
       - name: Prepare for GitHub Pages
         env:
           BASE: /${{ github.event.repository.name }}
         run: |
-          python3 - <<'PY'
+          python3 <<'PY'
           import os
           import re
+          import shutil
           from pathlib import Path
 
           base = os.environ["BASE"]
-          build_dir = Path("build/WebGL")
-          index = build_dir / "index.html"
+          platform_dir = Path("build/WebGL")
+          if not platform_dir.is_dir():
+              raise SystemExit(f"Build output not found: {platform_dir}")
+
+          index = platform_dir / "index.html"
+          if not index.is_file():
+              nested = platform_dir / "WebGL" / "index.html"
+              if nested.is_file():
+                  index = nested
+              else:
+                  candidates = list(platform_dir.rglob("index.html"))
+                  if not candidates:
+                      raise SystemExit(f"No index.html under {platform_dir}")
+                  index = min(candidates, key=lambda p: len(p.parts))
+
+          deploy_dir = index.parent
           text = index.read_text(encoding="utf-8")
           text = re.sub(r'(buildUrl:\s*")([^"]+)"', rf'\1{base}/\2"', text)
           text = re.sub(r'(streamingAssetsUrl:\s*")([^"]+)"', rf'\1{base}/\2"', text)
           index.write_text(text, encoding="utf-8")
-          (build_dir / ".nojekyll").touch()
+          (deploy_dir / ".nojekyll").touch()
+
+          staging = Path("pages")
+          if staging.exists():
+              shutil.rmtree(staging)
+          shutil.copytree(deploy_dir, staging)
+          print(f"Prepared {deploy_dir} -> {staging}")
           PY
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
         with:
-          path: build/WebGL
+          path: pages
 
   deploy:
     name: Deploy to GitHub Pages
     needs: build
     runs-on: ubuntu-latest
     environment:
-      name: github-pages
+      name: ${{ 'github' }}-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Deploy
