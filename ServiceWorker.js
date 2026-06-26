@@ -1,4 +1,4 @@
-const cacheName = "DefaultCompany-CrazyPawns-0.0.7";
+const cacheName = "DefaultCompany-CrazyPawns-0.0.8";
 const contentToCache = [
     "Build/WebGL.loader.js",
     "Build/WebGL.framework.js",
