@@ -117,6 +117,15 @@ jobs:
           )
           index.write_text(text, encoding="utf-8")
           (staging / ".nojekyll").touch()
+
+          unityweb = list(staging.rglob("*.unityweb"))
+          if not unityweb:
+              print("Expected Brotli + Decompression Fallback (.unityweb files), but none found:")
+              for path in sorted(staging.rglob("Build/*"))[:40]:
+                  print(path)
+              raise SystemExit(1)
+          print(f"Found {len(unityweb)} compressed build file(s) (.unityweb)")
+
           print(f"Prepared {deploy_dir} -> {staging}")
           PY
 
