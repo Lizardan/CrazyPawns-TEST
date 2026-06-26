@@ -51,6 +51,10 @@ jobs:
           unityVersion: auto
           buildsPath: build
 
+      - name: Fix build permissions
+        run: |
+          if [ -d build ]; then sudo chown -R "$USER:$USER" build; fi
+
       - name: Prepare for GitHub Pages
         env:
           BASE: /${{ github.event.repository.name }}
@@ -62,32 +66,57 @@ jobs:
           from pathlib import Path
 
           base = os.environ["BASE"]
-          platform_dir = Path("build/WebGL")
-          if not platform_dir.is_dir():
-              raise SystemExit(f"Build output not found: {platform_dir}")
+          roots = [Path("build/WebGL"), Path("build"), Path("Build/WebGL"), Path("Build")]
+          platform_dir = next((p for p in roots if p.is_dir()), None)
+          if platform_dir is None:
+              print("No build output directory found. Tree:")
+              for root in ("build", "Build"):
+                  p = Path(root)
+                  if p.exists():
+                      for path in sorted(p.rglob("*"))[:80]:
+                          print(path)
+              raise SystemExit(1)
 
-          index = platform_dir / "index.html"
-          if not index.is_file():
-              nested = platform_dir / "WebGL" / "index.html"
-              if nested.is_file():
-                  index = nested
-              else:
-                  candidates = list(platform_dir.rglob("index.html"))
-                  if not candidates:
-                      raise SystemExit(f"No index.html under {platform_dir}")
-                  index = min(candidates, key=lambda p: len(p.parts))
+          candidates = list(platform_dir.rglob("index.html"))
+          if not candidates:
+              print(f"No index.html under {platform_dir}. Tree:")
+              for path in sorted(platform_dir.rglob("*"))[:80]:
+                  print(path)
+              raise SystemExit(1)
 
+          index = min(candidates, key=lambda p: len(p.parts))
           deploy_dir = index.parent
-          text = index.read_text(encoding="utf-8")
-          text = re.sub(r'(buildUrl:\s*")([^"]+)"', rf'\1{base}/\2"', text)
-          text = re.sub(r'(streamingAssetsUrl:\s*")([^"]+)"', rf'\1{base}/\2"', text)
-          index.write_text(text, encoding="utf-8")
-          (deploy_dir / ".nojekyll").touch()
 
           staging = Path("pages")
           if staging.exists():
               shutil.rmtree(staging)
           shutil.copytree(deploy_dir, staging)
+
+          index = staging / "index.html"
+          text = index.read_text(encoding="utf-8")
+
+          def with_base(value: str) -> str:
+              if value.startswith(base):
+                  return value
+              return f"{base}/{value}"
+
+          text = re.sub(
+              r'var buildUrl = "([^"]+)"',
+              lambda m: f'var buildUrl = "{with_base(m.group(1))}"',
+              text,
+          )
+          text = re.sub(
+              r'(buildUrl:\s*")([^"]+)"',
+              lambda m: f'{m.group(1)}{with_base(m.group(2))}"',
+              text,
+          )
+          text = re.sub(
+              r'(streamingAssetsUrl:\s*")([^"]+)"',
+              lambda m: f'{m.group(1)}{with_base(m.group(2))}"',
+              text,
+          )
+          index.write_text(text, encoding="utf-8")
+          (staging / ".nojekyll").touch()
           print(f"Prepared {deploy_dir} -> {staging}")
           PY
 
