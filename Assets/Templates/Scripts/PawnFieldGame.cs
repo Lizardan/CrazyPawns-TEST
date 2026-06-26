@@ -78,11 +78,13 @@ public class PawnFieldGame : MonoBehaviour
         boardBlack = NewCellMat(settings.BlackCellColor);
         boardWhite = NewCellMat(settings.WhiteCellColor);
         for (int x = 0; x < settings.CheckerboardSize; x++)
-        for (int z = 0; z < settings.CheckerboardSize; z++)
         {
-            var cell = Instantiate(cellPrefab, root.transform);
-            cell.transform.position = new Vector3(-origin + x * CellSize, 0f, -origin + z * CellSize);
-            cell.GetComponent<Renderer>().sharedMaterial = (x + z) % 2 == 0 ? boardBlack : boardWhite;
+            for (int z = 0; z < settings.CheckerboardSize; z++)
+            {
+                var cell = Instantiate(cellPrefab, root.transform);
+                cell.transform.position = new Vector3(-origin + x * CellSize, 0f, -origin + z * CellSize);
+                cell.GetComponent<Renderer>().sharedMaterial = (x + z) % 2 == 0 ? boardBlack : boardWhite;
+            }
         }
     }
 
