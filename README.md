@@ -67,16 +67,16 @@
 
 Workflow: [`.github/workflows/deploy-webgl.yml`](.github/workflows/deploy-webgl.yml)
 
-Сборка WebGL через [game-ci/unity-builder@v5](https://github.com/game-ci/unity-builder), публикация через [actions/upload-pages-artifact@v5](https://github.com/actions/upload-pages-artifact) и [actions/deploy-pages@v5](https://github.com/actions/deploy-pages).
+Сборка WebGL через [game-ci/unity-builder@v5](https://github.com/game-ci/unity-builder), публикация в ветку `gh-pages` через [peaceiris/actions-gh-pages@v4](https://github.com/peaceiris/actions-gh-pages).
 
 ### Один раз: настройка
 
-1. **GitHub Pages** → Settings → Pages → Build and deployment → Source: **GitHub Actions**
-2. **Секреты** (Settings → Secrets and variables → Actions):
+1. **Секреты** (Settings → Secrets and variables → Actions):
    - `UNITY_LICENSE` — содержимое файла `Unity_lic.ulf` ([инструкция GameCI](https://game.ci/docs/github/activation))
    - `UNITY_EMAIL` — email аккаунта Unity
    - `UNITY_PASSWORD` — пароль аккаунта Unity
-3. Push в ветку `main` или ручной запуск workflow (Actions → Build and deploy WebGL → Run workflow)
+2. Push в ветку `main` или ручной запуск workflow (Actions → Build and deploy WebGL → Run workflow)
+3. После успешного workflow: **Settings → Pages → Build and deployment → Source:** Deploy from a branch → Branch: **`gh-pages`** / **`/(root)`**
 
 Игра будет доступна по адресу: `https://<username>.github.io/CrazyPawns-TEST/`
 
