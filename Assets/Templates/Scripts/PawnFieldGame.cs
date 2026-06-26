@@ -6,7 +6,7 @@ public class PawnFieldGame : MonoBehaviour
 {
     public static PawnFieldGame Instance { get; private set; }
 
-    [SerializeField] CrazyPawnSettings settings;
+    public CrazyPawnSettings settings;
     [SerializeField] GameObject pawnPrefab;
     [SerializeField] GameObject cellPrefab;
     [SerializeField] Material linkMaterial;
@@ -14,38 +14,29 @@ public class PawnFieldGame : MonoBehaviour
     const float CellSize = 1.5f;
     const float ScrollSpeed = 2f;
     const float ZoomSmoothing = 12f;
+    const float DragThresholdSq = 25f;
 
     float boardHalf;
     Camera cam;
-    Material cellTemplate;
-    Material boardBlack;
-    Material boardWhite;
+    Material cellTemplate, boardBlack, boardWhite;
 
     UnilityScriptForPawnFormTechArtists dragPawn;
-    bool panning;
-    Vector3 panGround;
-    Vector3 panCam;
+    bool panning, connecting, dragConnect, connectorClick;
+    Vector3 panGround, panCam;
     Vector2 mouseDown;
-
     UtilityScriptForConnectorFromTechArtist connectFrom;
-    bool connecting;
-    bool dragConnect;
-    bool connectorClick;
-
     float zoomImpulse;
 
+    readonly List<UnilityScriptForPawnFormTechArtists> pawns = new();
     readonly List<(UtilityScriptForConnectorFromTechArtist a, UtilityScriptForConnectorFromTechArtist b, LineRenderer line)> links = new();
+
+    public bool IsOffBoard(Vector3 p) => Mathf.Abs(p.x) > boardHalf || Mathf.Abs(p.z) > boardHalf;
 
     void Awake()
     {
         Instance = this;
         cam = Camera.main;
-        UtilityScriptForConnectorFromTechArtist.SetActiveMaterial(settings.ActiveConnectorMaterial);
         cellTemplate = cellPrefab.GetComponent<Renderer>().sharedMaterial;
-    }
-
-    void Start()
-    {
         boardHalf = settings.CheckerboardSize * CellSize * 0.5f;
         CreateBoard();
         SpawnPawns();
@@ -56,9 +47,8 @@ public class PawnFieldGame : MonoBehaviour
         if (Instance == this) Instance = null;
         if (boardBlack) Destroy(boardBlack);
         if (boardWhite) Destroy(boardWhite);
-        foreach (var (_, _, line) in links)
-            if (line) Destroy(line.gameObject);
-        links.Clear();
+        for (int i = links.Count - 1; i >= 0; i--) RemoveLinkAt(i);
+        pawns.Clear();
     }
 
     void Update()
@@ -75,12 +65,7 @@ public class PawnFieldGame : MonoBehaviour
         for (int i = links.Count - 1; i >= 0; i--)
         {
             var (a, b, line) = links[i];
-            if (!a || !b)
-            {
-                if (line) Destroy(line.gameObject);
-                links.RemoveAt(i);
-                continue;
-            }
+            if (!a || !b) { RemoveLinkAt(i); continue; }
             line.SetPosition(0, a.transform.position);
             line.SetPosition(1, b.transform.position);
         }
@@ -92,14 +77,13 @@ public class PawnFieldGame : MonoBehaviour
         var origin = boardHalf - CellSize * 0.5f;
         boardBlack = NewCellMat(settings.BlackCellColor);
         boardWhite = NewCellMat(settings.WhiteCellColor);
-
         for (int x = 0; x < settings.CheckerboardSize; x++)
-            for (int z = 0; z < settings.CheckerboardSize; z++)
-            {
-                var cell = Instantiate(cellPrefab, root.transform);
-                cell.transform.position = new Vector3(-origin + x * CellSize, 0f, -origin + z * CellSize);
-                cell.GetComponent<Renderer>().sharedMaterial = (x + z) % 2 == 0 ? boardBlack : boardWhite;
-            }
+        for (int z = 0; z < settings.CheckerboardSize; z++)
+        {
+            var cell = Instantiate(cellPrefab, root.transform);
+            cell.transform.position = new Vector3(-origin + x * CellSize, 0f, -origin + z * CellSize);
+            cell.GetComponent<Renderer>().sharedMaterial = (x + z) % 2 == 0 ? boardBlack : boardWhite;
+        }
     }
 
     Material NewCellMat(Color color)
@@ -113,9 +97,11 @@ public class PawnFieldGame : MonoBehaviour
     {
         for (int i = 0; i < settings.InitialPawnCount; i++)
         {
-            var p = UnityEngine.Random.insideUnitCircle * settings.InitialZoneRadius;
-            var go = Instantiate(pawnPrefab, new Vector3(p.x, 0f, p.y), Quaternion.identity);
-            go.GetComponent<UnilityScriptForPawnFormTechArtists>().Init(settings, boardHalf);
+            var p = Random.insideUnitCircle * settings.InitialZoneRadius;
+            var pawn = Instantiate(pawnPrefab, new Vector3(p.x, 0f, p.y), Quaternion.identity)
+                .GetComponent<UnilityScriptForPawnFormTechArtists>();
+            pawn.Init();
+            pawns.Add(pawn);
         }
     }
 
@@ -124,8 +110,7 @@ public class PawnFieldGame : MonoBehaviour
         mouseDown = Input.mousePosition;
         connectorClick = false;
 
-        var col = UnderMouse();
-        if (col)
+        if (UnderMouse(out var col))
         {
             var connector = col.GetComponent<UtilityScriptForConnectorFromTechArtist>();
             if (connector)
@@ -135,7 +120,6 @@ public class PawnFieldGame : MonoBehaviour
                 connectorClick = true;
                 return;
             }
-
             var pawn = col.GetComponentInParent<UnilityScriptForPawnFormTechArtists>();
             if (pawn)
             {
@@ -146,7 +130,6 @@ public class PawnFieldGame : MonoBehaviour
         }
 
         if (connecting && !dragConnect) EndConnect(null);
-
         panning = true;
         panCam = cam.transform.position;
         panGround = GroundUnderMouse(panCam);
@@ -154,14 +137,10 @@ public class PawnFieldGame : MonoBehaviour
 
     void MouseDrag()
     {
-        if (connectorClick && connecting && ((Vector2)Input.mousePosition - mouseDown).sqrMagnitude > 25f)
+        if (connectorClick && connecting && ((Vector2)Input.mousePosition - mouseDown).sqrMagnitude > DragThresholdSq)
             dragConnect = true;
-
-        if (dragPawn)
-            dragPawn.Drag(GroundUnderMouse(cam.transform.position));
-
+        if (dragPawn) dragPawn.Drag(GroundUnderMouse(cam.transform.position));
         if (!panning) return;
-
         var delta = panGround - GroundUnderMouse(panCam);
         cam.transform.position = panCam + new Vector3(delta.x, 0f, delta.z);
     }
@@ -169,15 +148,10 @@ public class PawnFieldGame : MonoBehaviour
     void MouseUp()
     {
         if (dragConnect && connecting)
-        {
-            var col = UnderMouse();
-            EndConnect(col ? col.GetComponent<UtilityScriptForConnectorFromTechArtist>() : null);
-        }
-
+            EndConnect(UnderMouse(out var col) ? col.GetComponent<UtilityScriptForConnectorFromTechArtist>() : null);
         dragPawn?.EndDrag();
         dragPawn = null;
-        panning = false;
-        connectorClick = false;
+        panning = connectorClick = false;
     }
 
     void StartConnect(UtilityScriptForConnectorFromTechArtist from)
@@ -185,27 +159,36 @@ public class PawnFieldGame : MonoBehaviour
         connectFrom = from;
         connecting = true;
         dragConnect = false;
-        foreach (var c in FindObjectsByType<UtilityScriptForConnectorFromTechArtist>())
-            if (c && c.Pawn != from.Pawn) c.SetHighlighted(true);
+        from.SetWaitingConnect(true);
+        SetPawnHighlights(true, from.Pawn);
     }
 
     void EndConnect(UtilityScriptForConnectorFromTechArtist to)
     {
-        foreach (var c in FindObjectsByType<UtilityScriptForConnectorFromTechArtist>())
-            if (c) c.SetHighlighted(false);
-
-        if (connectFrom && to && connectFrom.Pawn != to.Pawn && !Linked(connectFrom, to))
-            AddLink(connectFrom, to);
-
+        if (connecting)
+        {
+            if (connectFrom) connectFrom.SetWaitingConnect(false);
+            SetPawnHighlights(false);
+        }
+        var from = connectFrom;
         connectFrom = null;
-        connecting = false;
-        dragConnect = false;
+        connecting = dragConnect = false;
+        if (from && to && from.Pawn != to.Pawn && !HasLink(from, to)) AddLink(from, to);
     }
 
-    bool Linked(UtilityScriptForConnectorFromTechArtist a, UtilityScriptForConnectorFromTechArtist b)
+    void SetPawnHighlights(bool on, UnilityScriptForPawnFormTechArtists skip = null)
     {
-        foreach (var (la, lb, _) in links)
+        for (int i = 0; i < pawns.Count; i++)
+            if (pawns[i] && pawns[i] != skip) pawns[i].SetConnectorsHighlighted(on);
+    }
+
+    bool HasLink(UtilityScriptForConnectorFromTechArtist a, UtilityScriptForConnectorFromTechArtist b)
+    {
+        for (int i = 0; i < links.Count; i++)
+        {
+            var (la, lb, _) = links[i];
             if ((la == a && lb == b) || (la == b && lb == a)) return true;
+        }
         return false;
     }
 
@@ -221,47 +204,51 @@ public class PawnFieldGame : MonoBehaviour
         links.Add((a, b, line));
     }
 
-    public void OnPawnDestroyed(UnilityScriptForPawnFormTechArtists pawn)
+    void RemoveLinkAt(int index)
     {
-        var dead = new HashSet<UtilityScriptForConnectorFromTechArtist>(pawn.GetComponentsInChildren<UtilityScriptForConnectorFromTechArtist>());
-        for (int i = links.Count - 1; i >= 0; i--)
-        {
-            if (!dead.Contains(links[i].a) && !dead.Contains(links[i].b)) continue;
-            Destroy(links[i].line.gameObject);
-            links.RemoveAt(i);
-        }
-        if (dragPawn == pawn) dragPawn = null;
-        if (connectFrom && dead.Contains(connectFrom)) EndConnect(null);
+        if (links[index].line) Destroy(links[index].line.gameObject);
+        links.RemoveAt(index);
     }
 
-    Collider UnderMouse()
+    public void OnPawnDestroyed(UnilityScriptForPawnFormTechArtists pawn)
     {
-        return Physics.Raycast(cam.ScreenPointToRay(Input.mousePosition), out var hit) ? hit.collider : null;
+        pawns.Remove(pawn);
+        for (int i = links.Count - 1; i >= 0; i--)
+        {
+            var (a, b, _) = links[i];
+            if (pawn.OwnsConnector(a) || pawn.OwnsConnector(b)) RemoveLinkAt(i);
+        }
+        if (dragPawn == pawn) dragPawn = null;
+        if (connectFrom && pawn.OwnsConnector(connectFrom)) EndConnect(null);
+    }
+
+    bool UnderMouse(out Collider col)
+    {
+        if (Physics.Raycast(cam.ScreenPointToRay(Input.mousePosition), out var hit))
+        {
+            col = hit.collider;
+            return true;
+        }
+        col = null;
+        return false;
     }
 
     Vector3 GroundUnderMouse(Vector3 camPos)
     {
         var m = Input.mousePosition;
         var near = cam.ScreenToWorldPoint(new Vector3(m.x, m.y, cam.nearClipPlane));
-        var far = cam.ScreenToWorldPoint(new Vector3(m.x, m.y, cam.farClipPlane));
-        var dir = far - near;
+        var dir = cam.ScreenToWorldPoint(new Vector3(m.x, m.y, cam.farClipPlane)) - near;
         if (Mathf.Abs(dir.y) < 1e-5f) return new Vector3(camPos.x, 0f, camPos.z);
         return camPos + dir * (-camPos.y / dir.y);
     }
 
     void ApplyZoom()
     {
-        if (Mathf.Abs(zoomImpulse) < 0.001f)
-        {
-            zoomImpulse = 0f;
-            return;
-        }
-
+        if (Mathf.Abs(zoomImpulse) < 0.001f) { zoomImpulse = 0f; return; }
         var vp = cam.ScreenToViewportPoint(Input.mousePosition);
         var dir = cam.transform.forward;
         dir += cam.transform.right * (vp.x - 0.5f) * 2f;
         dir += cam.transform.up * (vp.y - 0.5f) * 2f;
-
         cam.transform.position += dir.normalized * (zoomImpulse * ScrollSpeed * Time.deltaTime * 12f);
         zoomImpulse = Mathf.Lerp(zoomImpulse, 0f, Time.deltaTime * ZoomSmoothing);
     }
